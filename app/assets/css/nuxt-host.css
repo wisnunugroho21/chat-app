@@ -1,0 +1,17 @@
+/* ============================================================
+NUXT HOST
+The clone sizes itself from `.app { height: 100% }`, which in the original
+file resolved against a <body> holding nothing else in flow. Nuxt mounts
+into a wrapper and parks `#teleports` (plus the devtools container in dev)
+next to it, so <body> is no longer that clean single-cell grid.
+
+The mount point takes over that job: it pins itself to the viewport and
+centres its one in-flow child. Everything between it and `.app` — the root
+component and the page wrapper — steps out of the box tree.
+============================================================ */
+#__nuxt {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+}
