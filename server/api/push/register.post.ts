@@ -1,27 +1,26 @@
-import type { WireUser } from '#shared/types/wire'
-
 interface Body {
   token?: string
-  user?: WireUser
   rooms?: string[]
 }
 
-/** A browser hands over the FCM token it just minted, plus what it listens to. */
+/**
+ * A browser hands over the FCM token it just minted, plus what it listens to.
+ * Whose token it is comes from the session, not the body — a token registered
+ * against somebody else's identity would send them your notifications.
+ */
 export default defineEventHandler(async (event) => {
+  const user = await requireUser(event)
   const body = await readBody<Body>(event)
 
   if (!body?.token || typeof body.token !== 'string') {
     throw createError({ statusCode: 400, statusMessage: 'token is required' })
-  }
-  if (!body.user?.id || !body.user?.name) {
-    throw createError({ statusCode: 400, statusMessage: 'user is required' })
   }
 
   const rooms = Array.isArray(body.rooms)
     ? body.rooms.filter(r => typeof r === 'string' && r).slice(0, 200)
     : []
 
-  await registerToken(body.token, { id: body.user.id, name: body.user.name }, rooms)
+  await registerToken(body.token, { id: user.id, name: user.name }, rooms)
 
   return { ok: true, rooms: rooms.length }
 })

@@ -6,6 +6,7 @@ export default defineNuxtConfig({
   css: [
     '~/assets/css/nuxt-host.css',
     '~/assets/css/whatsapp.css',
+    '~/assets/css/auth.css',
   ],
 
   nitro: {
@@ -15,8 +16,15 @@ export default defineNuxtConfig({
   },
 
   runtimeConfig: {
-    // Where chats, messages and push tokens are stored. Absent = memory only,
-    // so the app still runs — it just starts empty after every restart.
+    // Seals the session cookie. Must be 32+ characters; absent means a random
+    // one per process, which works but signs everybody out on restart.
+    session: {
+      password: '',
+    },
+
+    // Where accounts, chats, messages and push tokens are stored. Absent =
+    // memory only, so the app still runs — it just starts empty after every
+    // restart, accounts included.
     mongodb: {
       uri: '',
       db: 'chat-app',

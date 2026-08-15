@@ -64,8 +64,12 @@ export type CallSignal =
   | { s: 'end', callId: string, reason: CallEndReason, secs?: number }
 
 export type ClientMessage =
-  /** First frame on every connection: who I am and what I am listening to. */
-  | { t: 'hello', user: WireUser, rooms: string[] }
+  /**
+   * First frame on every connection. The identity is not claimed here — it is
+   * proved: `ticket` is a one-shot token the browser got from an authenticated
+   * request, and the server resolves the account behind it.
+   */
+  | { t: 'hello', ticket: string, rooms: string[] }
   | { t: 'join', rooms: string[] }
   | { t: 'msg', room: string, wireId: string, text: string, time: string }
   | { t: 'typing', room: string, on: boolean }

@@ -7,6 +7,7 @@ const panel = useNewChatPanel()
 const calls = useCallCenter()
 const realtime = useRealtime()
 const push = usePush()
+const auth = useAuth()
 const { openMenu, say, busy } = useWhatsappOverlays()
 
 const { query, activeFilter, visibleChats } = store
@@ -61,6 +62,13 @@ async function toggleNotifications() {
   say(PUSH_NOTE[await push.enable()])
 }
 
+async function signOut() {
+  await auth.logout()
+  // The guard sends a signed-out visitor to the login page anyway; going
+  // there directly skips a render of a chat list that is no longer ours.
+  await navigateTo('/login')
+}
+
 function listMenu(event: MouseEvent) {
   openMenu(event.currentTarget as HTMLElement, [
     {
@@ -72,6 +80,11 @@ function listMenu(event: MouseEvent) {
       icon: 'refresh',
       label: 'Refresh',
       run: anchor => busy(anchor, () => say('Daftar chat dimuat ulang')),
+    },
+    {
+      icon: 'logout',
+      label: 'Sign out',
+      run: () => void signOut(),
     },
   ])
 }
@@ -86,6 +99,12 @@ function startNewChatFromSearch() {
   <aside class="sidebar">
     <header class="side-head">
       <h1 class="side-title">Chats</h1>
+      <!-- Who you are signed in as: two tabs are one account now, so it is
+           worth saying out loud. -->
+      <p v-if="auth.user.value" class="side-me">
+        <span class="material-symbols-outlined">account_circle</span>
+        <b>{{ auth.user.value.name }}</b>
+      </p>
       <button
         class="icon-btn"
         aria-label="Simulate an incoming call"

@@ -16,7 +16,10 @@ interface Registration {
   seen: number
 }
 
-const memory = new Map<string, Registration>()
+/** On `globalThis`: tokens are registered from an API route and read by the
+ *  socket route, which Nitro evaluates as separate module graphs. */
+const store = globalThis as typeof globalThis & { __waTokens?: Map<string, Registration> }
+const memory = (store.__waTokens ??= new Map<string, Registration>())
 
 export async function registerToken(token: string, user: WireUser, rooms: string[]) {
   const db = await chatCollections()

@@ -22,7 +22,6 @@ let listening = false
 
 export function usePush() {
   const store = useWhatsappStore()
-  const { me, restore } = useIdentity()
   const config = useRuntimeConfig().public.firebase
 
   const configured = computed(() =>
@@ -95,9 +94,11 @@ export function usePush() {
     }
 
     token.value = fresh
+    // No identity in the body: the server reads it off the session, so a
+    // token can only ever be registered against the account that sent it.
     await $fetch('/api/push/register', {
       method: 'POST',
-      body: { token: fresh, user: restore(), rooms: store.chats.value.map(c => c.name) },
+      body: { token: fresh, rooms: store.chats.value.map(c => c.name) },
     })
 
     // Foreground delivery: the worker stays quiet, so fold it into the thread.
@@ -183,7 +184,7 @@ export function usePush() {
     if (!token.value) return
     await $fetch('/api/push/register', {
       method: 'POST',
-      body: { token: token.value, user: me.value, rooms: store.chats.value.map(c => c.name) },
+      body: { token: token.value, rooms: store.chats.value.map(c => c.name) },
     }).catch(() => {})
   }
 

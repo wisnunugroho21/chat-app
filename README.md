@@ -2,6 +2,30 @@
 
 Look at the [Nuxt documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
 
+## Accounts
+
+Sign in at `/login`, or create an account at `/register`. Everything else is
+behind that: a signed-out visitor is redirected before any chat markup is
+rendered, and the history and push endpoints refuse them outright.
+
+Passwords are hashed with scrypt from `node:crypto` — memory-hard, in the
+standard library, no native build step — and only ever stored as a digest and
+its salt. The session is a sealed, HTTP-only cookie signed with
+`NUXT_SESSION_PASSWORD`; the server keeps no session table, so a restart does
+not sign anyone out.
+
+The WebSocket authenticates too, which is the part worth knowing about. A
+socket cannot read the session cookie the way an endpoint can, and the first
+frame used to simply *claim* an identity — meaning anyone could have typed
+someone else's name. Now the browser spends its session on
+`POST /api/realtime/ticket`, gets a single-use token valid for a minute, and
+the socket presents that instead. The server resolves the account behind it and
+stamps every message with that identity, so a client cannot assert who it is.
+
+> **Testing with two people.** `?as=Name` is gone — a real session belongs to a
+> browser profile, so two tabs are now one account. Use a second browser or a
+> private window for the other side.
+
 ## Storage
 
 Chats, messages, delivery receipts and push tokens are written to MongoDB, and
@@ -20,13 +44,15 @@ docker run -d -p 27017:27017 --name chat-mongo mongo:8
 ```
 
 It is optional. With no URI the app keeps everything in memory and starts from
-the seed data on every restart — the same way it behaves with no Firebase
-service account, where push is off and the socket delivers on its own.
+the seed data on every restart — accounts included, so you would register again
+each time. The same way it behaves with no Firebase service account, where push
+is off and the socket delivers on its own.
 
 Three collections, created with their indexes on first connect:
 
 | Collection | Holds |
 | ---------- | ----- |
+| `users`    | one account: public id, unique handle, display name, scrypt salt and digest |
 | `messages` | one document per message, keyed by its unique `wireId`, with delivery status |
 | `calls`    | one per finished call, keyed by `callId`: who placed it, how it ended, how long it ran |
 | `rooms`    | one per conversation: participants seen, and the newest message for the chat list |

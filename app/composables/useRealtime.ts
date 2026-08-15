@@ -14,6 +14,8 @@ const status = ref<RealtimeStatus>('idle')
 
 // Connection state is per-tab and client-only, so module scope is safe.
 let socket: WebSocket | null = null
+/** A connect that is still fetching its ticket, and has no socket to show. */
+let opening = false
 let attempt = 0
 let retryTimer: ReturnType<typeof setTimeout> | null = null
 let closedOnPurpose = false
@@ -32,7 +34,7 @@ export function useRealtime() {
   // Resolved here, during setup, because `handle` runs from a socket event
   // where there is no Nuxt instance to look a composable up against.
   const calls = useCallCenter()
-  const { me, restore } = useIdentity()
+  const { me } = useIdentity()
 
   const isOnline = computed(() => status.value === 'online')
 
@@ -88,6 +90,11 @@ export function useRealtime() {
 
       case 'error':
         console.warn('[realtime]', frame.message)
+        // A handshake the server refused — a ticket lost to a restart, say —
+        // leaves a socket that is open but anonymous, and nothing else will
+        // ever move it off 'connecting'. Drop it so the backoff can come back
+        // with a fresh ticket.
+        if (status.value !== 'online') socket?.close()
         break
     }
   }
@@ -104,21 +111,48 @@ export function useRealtime() {
     }, wait + Math.random() * 400)
   }
 
-  function connect() {
+  async function connect() {
     if (!import.meta.client) return
+    if (opening) return
     if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return
 
     closedOnPurpose = false
+    opening = true
     status.value = 'connecting'
+
+    // The socket cannot present the session cookie itself, so the identity is
+    // bought here, on an ordinary authenticated request, and proved on `hello`.
+    let ticket: string
+    try {
+      ticket = (await $fetch<{ ticket: string }>('/api/realtime/ticket', { method: 'POST' })).ticket
+    }
+    catch {
+      // Signed out, or the server is down. Backing off covers both.
+      opening = false
+      status.value = 'offline'
+      scheduleRetry()
+      return
+    }
+
+    // Disconnected while the ticket was in flight: let it expire unused.
+    if (closedOnPurpose) {
+      opening = false
+      status.value = 'idle'
+      return
+    }
+
     const ws = new WebSocket(socketUrl())
     socket = ws
+    opening = false
 
     ws.onopen = () => {
       attempt = 0
       const rooms = roomNames()
       joined.clear()
       for (const room of rooms) joined.add(room)
-      ws.send(JSON.stringify({ t: 'hello', user: restore(), rooms } satisfies ClientMessage))
+      // Hello first, then whatever queued while we were connecting — the
+      // server will not accept any of it until the handshake has landed.
+      ws.send(JSON.stringify({ t: 'hello', ticket, rooms } satisfies ClientMessage))
       flush()
     }
 
@@ -148,6 +182,9 @@ export function useRealtime() {
     }
     socket?.close()
     socket = null
+    // Whatever was queued belongs to the session that just ended.
+    outbox.length = 0
+    joined.clear()
     status.value = 'idle'
   }
 

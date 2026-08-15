@@ -67,11 +67,28 @@ export interface TokenDoc {
   seen: Date
 }
 
+/**
+ * An account. `id` is the public identity carried on the wire and stored on
+ * every message; `username` is only ever used to sign in. The password is a
+ * scrypt digest and its salt — see `users.ts`; nothing here is reversible.
+ */
+export interface UserDoc {
+  id: string
+  /** Lower-cased handle, unique. */
+  username: string
+  /** What everyone else sees. */
+  name: string
+  salt: string
+  hash: string
+  createdAt: Date
+}
+
 export interface ChatCollections {
   messages: Collection<MessageDoc>
   calls: Collection<CallDoc>
   rooms: Collection<RoomDoc>
   tokens: Collection<TokenDoc>
+  users: Collection<UserDoc>
 }
 
 /** How long to sit out before dialling a Mongo that just refused us. */
@@ -124,6 +141,10 @@ async function ensureIndexes(db: Db) {
     db.collection<RoomDoc>('rooms').createIndex({ updatedAt: -1 }),
     db.collection<TokenDoc>('tokens').createIndex({ token: 1 }, { unique: true }),
     db.collection<TokenDoc>('tokens').createIndex({ rooms: 1 }),
+    // Unique on both: the handle is what you sign in with, the id is what
+    // every message you have ever sent points at.
+    db.collection<UserDoc>('users').createIndex({ username: 1 }, { unique: true }),
+    db.collection<UserDoc>('users').createIndex({ id: 1 }, { unique: true }),
   ])
 }
 
@@ -152,6 +173,7 @@ export async function chatCollections(): Promise<ChatCollections | null> {
     calls: db.collection<CallDoc>('calls'),
     rooms: db.collection<RoomDoc>('rooms'),
     tokens: db.collection<TokenDoc>('tokens'),
+    users: db.collection<UserDoc>('users'),
   }
 }
 
