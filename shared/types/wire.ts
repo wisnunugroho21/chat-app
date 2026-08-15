@@ -71,8 +71,18 @@ export type ClientMessage =
    */
   | { t: 'hello', ticket: string, rooms: string[] }
   | { t: 'join', rooms: string[] }
-  | { t: 'msg', room: string, wireId: string, text: string, time: string }
-  | { t: 'typing', room: string, on: boolean }
+  /**
+   * `to` is the account on the other end of a one-to-one conversation.
+   *
+   * A room is keyed by whatever the person who started it called the chat,
+   * which for a one-to-one is the *recipient's* name — and nobody subscribes
+   * to a room named after themselves. So the very first message to someone
+   * would reach a topic with no listener. Naming the account as well is what
+   * makes a conversation that does not exist yet arrive at all. Groups leave
+   * it unset and travel by room alone.
+   */
+  | { t: 'msg', room: string, to?: string, wireId: string, text: string, time: string }
+  | { t: 'typing', room: string, to?: string, on: boolean }
   | { t: 'receipt', room: string, wireIds: string[], status: ReceiptStatus }
   /** `to` addresses one user; without it the whole room hears it. */
   | { t: 'call', room: string, to?: string, signal: CallSignal }

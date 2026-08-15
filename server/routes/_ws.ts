@@ -37,6 +37,21 @@ function parse(raw: string): ClientMessage | null {
 const asRooms = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter(r => typeof r === 'string' && r).slice(0, 200) : []
 
+/**
+ * The account a one-to-one frame should be delivered to *in addition* to the
+ * room — which is only when the room does not already reach them.
+ *
+ * Everyone listens on their own id, so addressing unconditionally would send
+ * a second copy of every message to anyone already in the room. The client
+ * drops it by `wireId`, but it doubles the fan-out on the commonest operation
+ * for no gain. Presence knows who is in a room, so ask.
+ */
+function addressee(value: unknown, senderId: string, room: string): string | null {
+  if (typeof value !== 'string' || !value || value === senderId) return null
+  const to = value.slice(0, 64)
+  return usersInRoom(room).has(to) ? null : to
+}
+
 const SIGNALS = new Set(['invite', 'ring', 'accept', 'offer', 'answer', 'ice', 'media', 'end'])
 
 /**
@@ -149,7 +164,14 @@ async function handleFrame(peer: Peer, raw: string) {
         text,
         time: String(frame.time),
       }
-      peer.publish(topic(frame.room), JSON.stringify(payload))
+      const body = JSON.stringify(payload)
+      peer.publish(topic(frame.room), body)
+      // And to the recipient by account, so a conversation they have never
+      // had — and so never subscribed to — still reaches them. Their client
+      // drops the duplicate by `wireId` once both paths exist.
+      const to = addressee(frame.to, session.user.id, frame.room)
+      if (to) peer.publish(userTopic(to), body)
+
       // Delivery first, storage second: neither Mongo nor FCM being down is
       // allowed to hold up the tabs that are already listening.
       await saveMessage({
@@ -159,16 +181,20 @@ async function handleFrame(peer: Peer, raw: string) {
         text,
         time: payload.time,
       })
-      await pushToRoom(frame.room, session.user, text, payload.wireId)
+      await pushToRoom(frame.room, session.user, text, payload.wireId, to)
       break
     }
 
     case 'typing': {
       if (typeof frame.room !== 'string') break
-      peer.publish(
-        topic(frame.room),
-        JSON.stringify({ t: 'typing', room: frame.room, from: session.user, on: !!frame.on } satisfies ServerMessage),
+      const body = JSON.stringify(
+        { t: 'typing', room: frame.room, from: session.user, on: !!frame.on } satisfies ServerMessage,
       )
+      peer.publish(topic(frame.room), body)
+      // Same reasoning as `msg`: before the first message lands there is no
+      // shared room to carry this.
+      const to = addressee(frame.to, session.user.id, frame.room)
+      if (to) peer.publish(userTopic(to), body)
       break
     }
 
@@ -206,9 +232,18 @@ async function handleFrame(peer: Peer, raw: string) {
   }
 }
 
-/** Notify the room's registered devices. Never lets push break delivery. */
-async function pushToRoom(room: string, from: WireUser, text: string, wireId: string) {
-  const tokens = await tokensForRoom(room, from.id)
+/**
+ * Notify the room's registered devices, plus the addressee's own — a device
+ * that has never seen this conversation has not registered its room either,
+ * so without that second lookup the first message to somebody is silent.
+ * Never lets push break delivery.
+ */
+async function pushToRoom(room: string, from: WireUser, text: string, wireId: string, to?: string | null) {
+  const [byRoom, byUser] = await Promise.all([
+    tokensForRoom(room, from.id),
+    to ? tokensForUser(to) : Promise.resolve([]),
+  ])
+  const tokens = [...new Set([...byRoom, ...byUser])]
   if (!tokens.length) return
   try {
   await sendChatPush({

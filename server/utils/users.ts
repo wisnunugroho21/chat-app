@@ -70,6 +70,21 @@ export async function findByUsername(username: string): Promise<UserDoc | null> 
   return memory.get(key) ?? null
 }
 
+/** Everyone with an account, for the people picker. Alphabetical, capped. */
+export async function listUsers(exceptId?: string): Promise<UserDoc[]> {
+  const db = await chatCollections()
+  if (db) {
+    return db.users
+      .find(exceptId ? { id: { $ne: exceptId } } : {})
+      .sort({ name: 1 })
+      .limit(500)
+      .toArray()
+  }
+  return [...memory.values()]
+    .filter(user => user.id !== exceptId)
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
 export async function findById(id: string): Promise<UserDoc | null> {
   const db = await chatCollections()
   if (db) return db.users.findOne({ id })

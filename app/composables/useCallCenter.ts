@@ -1,4 +1,3 @@
-import { CONTACTS } from '~/data/contacts'
 import type { Call, CallFace, CallKind } from '~/types/whatsapp'
 import { callOutcome } from '#shared/types/wire'
 import type { CallEndReason, CallSignal, IceCandidateWire, ServerMessage } from '#shared/types/wire'
@@ -65,12 +64,15 @@ export function useCallCenter() {
   const { motionMs } = useWhatsappLayout()
   const peer = usePeerConnection()
 
-  /** Avatar colour + initials for whoever is on the other end. */
+  /**
+   * Avatar colour + initials for whoever is on the other end. A conversation
+   * we already have keeps its own colour; anyone else gets the one their name
+   * hashes to, which is the same colour they will have once the chat exists.
+   */
   function faceOf(name: string): CallFace {
     const chat = store.chatByName(name)
     if (chat) return { av: chat.av, initials: faceInitials(chat) }
-    const contact = CONTACTS.find(c => c.name === name)
-    return { av: contact ? contact.av : 'a1', initials: initials(name) }
+    return { av: avatarTone(name), initials: initials(name) }
   }
 
   /** What the call screens paint. Outlives `call` through the closing fade,
@@ -234,7 +236,9 @@ export function useCallCenter() {
   function simulateIncoming() {
     if (call.value) return
     const pool = store.chats.value
+    // Nothing to pretend with until there is at least one conversation.
     const from = pool[Math.floor(Math.random() * pool.length)]?.name || store.current.value
+    if (!from) return announce('Mulai percakapan dulu untuk mencoba panggilan masuk.')
     forget()
     ringIncoming(from, Math.random() < 0.3 ? 'video' : 'voice', { simulated: true })
   }

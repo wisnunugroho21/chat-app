@@ -88,8 +88,22 @@ function pick(contact: Contact) {
           </div>
         </button>
 
-        <div v-if="!results.length" class="np-empty">
+        <div v-if="panel.loading.value && !results.length" class="np-empty">
+          Memuat kontak…
+        </div>
+
+        <div v-else-if="panel.failed.value" class="np-empty">
+          Gagal memuat kontak. Periksa koneksi, lalu coba lagi.
+        </div>
+
+        <div v-else-if="!results.length && search.trim()" class="np-empty">
           Tidak ada kontak bernama “{{ search.trim() }}”. Coba nama lain.
+        </div>
+
+        <!-- No accounts but ours: the directory is real people now, so this
+             is what a brand new deployment actually looks like. -->
+        <div v-else-if="!results.length" class="np-empty">
+          Belum ada pengguna lain yang terdaftar. Ajak seseorang mendaftar dulu.
         </div>
 
         <template v-else>

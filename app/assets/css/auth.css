@@ -133,6 +133,38 @@ same product as the one behind them.
     text-decoration: underline;
 }
 
+/* --- No conversation open ---
+   The right-hand pane before anything is picked. WhatsApp Web shows a similar
+   splash; this one also says what to do about it. */
+.chat-idle {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 40px;
+    text-align: center;
+    color: var(--muted);
+    background: var(--bg-deep);
+}
+
+.chat-idle .material-symbols-outlined {
+    font-size: 56px;
+    color: var(--panel-3);
+}
+
+.chat-idle h2 {
+    font-size: 19px;
+    font-weight: 400;
+    color: var(--text);
+}
+
+.chat-idle p {
+    max-width: 40ch;
+    font-size: 14px;
+}
+
 /* --- Signed-in identity, in the chat list header ---
    `.side-title` is already `flex: 1`, so this only has to stay narrow and
    give way before the icon buttons do. */

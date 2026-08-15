@@ -1,5 +1,3 @@
-import { CHATS } from '~/data/chats'
-import { MESSAGES } from '~/data/messages'
 import type {
   AvatarTone,
   Chat,
@@ -16,8 +14,9 @@ import type { HistoryPayload, ReceiptStatus, WireUser } from '#shared/types/wire
  * imports the transport, so the dependency only ever points one way.
  */
 export interface ChatTransport {
-  sendMessage: (room: string, msg: { wireId: string, text: string, time: string }) => void
-  sendTyping: (room: string, on: boolean) => void
+  /** `to` names the account on the other end, for rooms they may not know of. */
+  sendMessage: (room: string, msg: { wireId: string, text: string, time: string }, to?: string) => void
+  sendTyping: (room: string, on: boolean, to?: string) => void
   sendReceipt: (room: string, wireIds: string[], status: ReceiptStatus) => void
 }
 
@@ -33,6 +32,7 @@ const FILTERS: Record<FilterKey, (c: Chat) => boolean> = {
 }
 
 export const NOTHING_HERE: Partial<Record<FilterKey, string>> = {
+  all: 'Belum ada percakapan.',
   unread: 'Semua chat sudah dibaca.',
   favourites: 'Belum ada chat favorit. Tandai lewat menu di baris chat.',
   groups: 'Belum ada grup di daftar ini.',
@@ -40,18 +40,6 @@ export const NOTHING_HERE: Partial<Record<FilterKey, string>> = {
 
 /** A bubble the search can look inside; day pills and typing are not. */
 export const isMessage = (m: Message) => !m.kind || m.kind === 'call'
-
-function seedThreads(): Record<string, Message[]> {
-  let id = 0
-  return Object.fromEntries(
-    Object.entries(MESSAGES).map(([name, msgs]) => [
-      name,
-      // Nested objects (quote) get their own copy too, so the seed constant
-      // can never be mutated through a thread.
-      msgs.map(m => ({ ...m, id: ++id, ...(m.quote ? { quote: { ...m.quote } } : {}) })),
-    ]),
-  )
-}
 
 export function useWhatsappStore() {
   const { showPane } = useWhatsappLayout()
@@ -61,9 +49,13 @@ export function useWhatsappStore() {
   /** Is that name us? Empty during SSR, where nobody has an identity yet. */
   const isMe = (name: string) => sameName(name, me.value.name)
 
-  const chats = useState<Chat[]>('wa:chats', () => CHATS.map(c => ({ ...c })))
-  const threads = useState<Record<string, Message[]>>('wa:threads', seedThreads)
-  const current = useState<string>('wa:current', () => CHATS[0]!.name)
+  // Empty until the database says otherwise: conversations arrive from
+  // `/api/history`, from the socket, or from picking someone in the panel.
+  // Nothing here is invented locally.
+  const chats = useState<Chat[]>('wa:chats', () => [])
+  const threads = useState<Record<string, Message[]>>('wa:threads', () => ({}))
+  /** Empty means no conversation is open, which is the state on a fresh sign-in. */
+  const current = useState<string>('wa:current', () => '')
   const query = useState<string>('wa:query', () => '')
   const activeFilter = useState<FilterKey>('wa:filter', () => 'all')
   /** Bumped whenever the message box should take focus. */
@@ -103,6 +95,8 @@ export function useWhatsappStore() {
     name: string
     /** Only needed when the room key would read as our own name. */
     title?: string
+    /** The account this one-to-one conversation is with. */
+    peerId?: string
     av?: AvatarTone
     sub?: string
     preview?: string
@@ -114,7 +108,10 @@ export function useWhatsappStore() {
       const chat: Chat = {
         name: seed.name,
         title: seed.title,
-        av: seed.av || 'a2',
+        peerId: seed.peerId,
+        // Hashed from what the row is called, so a conversation keeps its
+        // colour without anyone having to store one.
+        av: seed.av || avatarTone(seed.title || seed.name),
         group: !!seed.group,
         sub: seed.sub || 'online',
         time: clockNow(),
@@ -127,6 +124,7 @@ export function useWhatsappStore() {
     }
     // Refresh metadata the caller knows more about than we do.
     if (seed.title) existing.title = seed.title
+    if (seed.peerId) existing.peerId = seed.peerId
     if (seed.av) existing.av = seed.av
     if (seed.sub) existing.sub = seed.sub
     if (seed.group !== undefined) existing.group = seed.group
@@ -214,7 +212,7 @@ export function useWhatsappStore() {
 
   function send(rawText: string) {
     const text = rawText.trim()
-    if (!text) return
+    if (!text || !current.value) return
 
     const target = current.value
     const time = clockNow()
@@ -229,16 +227,24 @@ export function useWhatsappStore() {
     if (chat) chat.status = 'sent'
 
     composerFocus.value++
-    transport.value?.sendTyping(target, false)
-    transport.value?.sendMessage(target, { wireId, text, time })
+    // Addressed to the person as well as the room: until they have replied
+    // once, the room is a topic only we are listening to.
+    transport.value?.sendTyping(target, false, chat?.peerId)
+    transport.value?.sendMessage(target, { wireId, text, time }, chat?.peerId)
   }
 
   /** A message arrived on the socket. Creates the conversation if it is new. */
   function receiveMessage(frame: { room: string, from: WireUser, wireId: string, text: string, time: string }) {
     const { room, from, text } = frame
 
-    // A message from someone not in the list opens a conversation for them.
-    const chat = ensureChat({ name: room, title: titleFor(room, from.name) })
+    // A message from someone not in the list opens a conversation for them —
+    // and remembers who they are, so the reply can be addressed back before
+    // this room means anything to either socket.
+    const chat = ensureChat({
+      name: room,
+      title: titleFor(room, from.name),
+      peerId: isMe(room) ? from.id : undefined,
+    })
     const msgs = threadOf(room)
 
     if (msgs.some(m => m.wireId === frame.wireId)) return // socket replay
@@ -299,6 +305,12 @@ export function useWhatsappStore() {
       // Optional-chained on purpose: a browser left open across a deploy can
       // be handed a reply from a server that predates this shape.
       for (const entry of payload.entries?.[room.name] ?? []) {
+        // Every entry names its sender, so a room keyed by our own name can
+        // recover who it is with — the addressing a reply needs.
+        if (!chat.peerId && entry.from.id !== meId && isMe(room.name)) {
+          chat.peerId = entry.from.id
+        }
+
         const key = entry.type === 'msg' ? entry.wireId : entry.callId
         if (seen.has(key)) continue
         seen.add(key)
@@ -390,7 +402,7 @@ export function useWhatsappStore() {
    * and by then `current` is already pointing somewhere else.
    */
   function notifyTyping(on: boolean, room = current.value) {
-    transport.value?.sendTyping(room, on)
+    transport.value?.sendTyping(room, on, chatByName(room)?.peerId)
   }
 
   /**

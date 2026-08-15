@@ -9,6 +9,8 @@ export type FilterKey = 'all' | 'unread' | 'favourites' | 'groups'
 export type { CallKind } from '#shared/types/wire'
 
 export interface Contact {
+  /** The account id, so a chat started from here knows who it is with. */
+  id?: string
   name: string
   about: string
   av: AvatarTone
@@ -26,6 +28,14 @@ export interface Chat {
    * labelled with whoever is actually on the other end.
    */
   title?: string
+  /**
+   * The account on the other end of a one-to-one conversation.
+   *
+   * Carried on outgoing frames so the first message reaches someone who has
+   * never subscribed to this room — which, for a chat they do not know about
+   * yet, is every one of them. Unset on groups.
+   */
+  peerId?: string
   av: AvatarTone
   /** Overrides the initials derived from the name. */
   initials?: string

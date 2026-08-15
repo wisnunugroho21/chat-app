@@ -197,9 +197,9 @@ export function useRealtime() {
   }
 
   const transport = {
-    sendMessage: (room: string, msg: { wireId: string, text: string, time: string }) =>
-      post({ t: 'msg', room, ...msg }),
-    sendTyping: (room: string, on: boolean) => post({ t: 'typing', room, on }),
+    sendMessage: (room: string, msg: { wireId: string, text: string, time: string }, to?: string) =>
+      post({ t: 'msg', room, to, ...msg }),
+    sendTyping: (room: string, on: boolean, to?: string) => post({ t: 'typing', room, to, on }),
     sendReceipt: (room: string, wireIds: string[], receipt: 'delivered' | 'read') =>
       post({ t: 'receipt', room, wireIds, status: receipt }),
     sendCall: (room: string, signal: CallSignal, to?: string) =>

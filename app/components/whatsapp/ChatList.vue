@@ -66,6 +66,9 @@ function rowMenu(anchor: HTMLElement, name: string) {
 
     <div v-else class="list-empty">
       {{ nothingHere }}
+      <template v-if="activeFilter === 'all'">
+        <br ><button type="button" @click="emit('startNewChat')">Start a new chat</button>
+      </template>
     </div>
   </div>
 </template>

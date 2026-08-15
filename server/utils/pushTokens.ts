@@ -57,6 +57,26 @@ export async function pruneTokens(dead: string[]) {
 }
 
 /**
+ * Every device belonging to one account. Used to reach somebody in a
+ * conversation their devices have never registered a room for.
+ */
+export async function tokensForUser(userId: string): Promise<string[]> {
+  const db = await chatCollections()
+  if (db) {
+    const docs = await db.tokens
+      .find({ 'user.id': userId }, { projection: { token: 1, _id: 0 } })
+      .toArray()
+    return docs.map(d => d.token)
+  }
+
+  const out: string[] = []
+  for (const [token, reg] of memory) {
+    if (reg.user.id === userId) out.push(token)
+  }
+  return out
+}
+
+/**
  * Tokens that should hear about a message in `room`, minus the sender's own
  * devices — a push to the author is noise, not a notification.
  */

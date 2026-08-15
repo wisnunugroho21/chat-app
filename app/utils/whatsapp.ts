@@ -1,5 +1,21 @@
-import type { Chat } from '~/types/whatsapp'
+import type { AvatarTone, Chat } from '~/types/whatsapp'
 import type { CallKind, CallOutcome } from '#shared/types/wire'
+
+const TONES: AvatarTone[] = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6']
+
+/**
+ * An avatar colour for someone, derived rather than stored.
+ *
+ * The palette used to be part of the seed data. With people coming from the
+ * database instead, the tone is hashed from a stable string — an account id,
+ * or a room name — so the same person is the same colour on every device and
+ * across reloads, without a column to keep in step.
+ */
+export function avatarTone(seed: string): AvatarTone {
+  let hash = 0
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
+  return TONES[hash % TONES.length]!
+}
 
 const CLOCK: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit', hour12: false }
 

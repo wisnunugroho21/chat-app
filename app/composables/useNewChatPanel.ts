@@ -1,5 +1,13 @@
-import { CONTACTS } from '~/data/contacts'
 import type { Contact } from '~/types/whatsapp'
+import type { AuthUser } from '~/composables/useAuth'
+
+/**
+ * The "new chat" panel, and the people in it.
+ *
+ * The list used to be a hardcoded constant. It is now everyone who has
+ * registered, fetched when the panel opens — so somebody who signed up a
+ * minute ago is there without a reload.
+ */
 
 // Client-only panel state: closed on the server, so module scope is safe.
 const open = ref(false)
@@ -16,12 +24,42 @@ export function useNewChatPanel() {
   const store = useWhatsappStore()
   const { me } = useIdentity()
 
-  /** Everyone but us: you cannot start a conversation with yourself. */
-  const others = computed(() => CONTACTS.filter(c => !sameName(c.name, me.value.name)))
+  const directory = useState<Contact[]>('wa:directory', () => [])
+  const loading = useState<boolean>('wa:directory-loading', () => false)
+  const failed = useState<boolean>('wa:directory-failed', () => false)
+
+  /** An account, as the picker shows it. The handle doubles as the subtitle. */
+  const asContact = (user: AuthUser): Contact => ({
+    id: user.id,
+    name: user.name,
+    about: `@${user.username}`,
+    av: avatarTone(user.id),
+  })
+
+  async function loadDirectory() {
+    loading.value = true
+    failed.value = false
+    try {
+      const reply = await $fetch<{ users: AuthUser[] }>('/api/users')
+      directory.value = reply.users.map(asContact)
+    }
+    catch {
+      failed.value = true
+      directory.value = []
+    }
+    finally {
+      loading.value = false
+    }
+  }
+
+  /** Belt and braces: the server already leaves us out of its own reply. */
+  const others = computed(() => directory.value.filter(c => !sameName(c.name, me.value.name)))
 
   const results = computed(() => {
     const q = search.value.trim().toLowerCase()
-    return others.value.filter(c => c.name.toLowerCase().includes(q))
+    return others.value.filter(c =>
+      c.name.toLowerCase().includes(q) || c.about.toLowerCase().includes(q),
+    )
   })
 
   /** Contacts grouped under their initial letter, in list order. */
@@ -39,6 +77,7 @@ export function useNewChatPanel() {
   const title = computed(() => (groupMode.value ? 'New group' : 'New chat'))
 
   const subtitle = computed(() => {
+    if (loading.value) return 'Memuat kontak…'
     if (groupMode.value && selected.value.size)
       return `${selected.value.size} of ${others.value.length} selected`
     return groupMode.value
@@ -53,6 +92,8 @@ export function useNewChatPanel() {
     groupName.value = ''
     open.value = true
     focusTick.value++
+    // Refreshed on every open: the point of a directory is that it is current.
+    void loadDirectory()
   }
 
   function closePanel() {
@@ -85,6 +126,9 @@ export function useNewChatPanel() {
     }
     store.ensureChat({
       name: contact.name,
+      // Started from the directory, so we know exactly who this is — which is
+      // what lets the first message arrive before they have any such room.
+      peerId: contact.id,
       av: contact.av,
       sub: contact.about,
       preview: 'Draft',
@@ -101,7 +145,6 @@ export function useNewChatPanel() {
 
     store.ensureChat({
       name,
-      av: 'a2',
       group: true,
       sub: `You, ${firstNames.join(', ')}`,
       preview: 'You created this group',
@@ -122,6 +165,8 @@ export function useNewChatPanel() {
     sections,
     title,
     subtitle,
+    loading,
+    failed,
     openPanel,
     closePanel,
     back,
