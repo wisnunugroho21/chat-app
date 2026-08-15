@@ -31,6 +31,33 @@ Three collections, created with their indexes on first connect:
 | `rooms`    | one per conversation: participants seen, and the newest message for the chat list |
 | `tokens`   | FCM registration tokens and the rooms each one listens to |
 
+## Calling
+
+Voice and video calls are real WebRTC: the audio and video go straight from
+one browser to the other, and the server only carries the handshake. That
+handshake rides the same WebSocket as the messages — `invite`, `ring`,
+`accept`, `ice`, `end` — so there is nothing extra to run.
+
+Try it with two tabs, the same way you would try messaging:
+
+```
+http://localhost:3000/?as=Rina    http://localhost:3000/?as=Budi
+```
+
+Open the same conversation in both, press the voice or video button in one,
+and pick up in the other. An invite rings every device in the conversation;
+whoever answers first gets the call, and the rest are told it was answered
+elsewhere.
+
+Between tabs on one machine nothing needs configuring. Across networks, the
+default public STUN servers cover most cases — a network behind symmetric NAT
+needs a TURN relay, which is what `NUXT_PUBLIC_WEBRTC_TURN_URL` is for.
+Browsers only grant a camera or microphone on a secure origin, so `localhost`
+works, but a phone on your LAN needs HTTPS.
+
+The ringer in the sidebar is still a simulation: it opens the call screen with
+no peer behind it, which is useful for looking at the UI on its own.
+
 ## Setup
 
 Make sure to install dependencies:

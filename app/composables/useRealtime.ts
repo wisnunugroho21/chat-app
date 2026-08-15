@@ -1,4 +1,4 @@
-import type { ClientMessage, ServerMessage } from '#shared/types/wire'
+import type { CallSignal, ClientMessage, ServerMessage } from '#shared/types/wire'
 
 /**
  * The WebSocket half of messaging: everything that happens while the tab is
@@ -29,6 +29,9 @@ function socketUrl(): string {
 
 export function useRealtime() {
   const store = useWhatsappStore()
+  // Resolved here, during setup, because `handle` runs from a socket event
+  // where there is no Nuxt instance to look a composable up against.
+  const calls = useCallCenter()
   const { me, restore } = useIdentity()
 
   const isOnline = computed(() => status.value === 'online')
@@ -75,6 +78,12 @@ export function useRealtime() {
 
       case 'receipt':
         store.applyReceipt(frame.room, frame.wireIds, frame.status)
+        break
+
+      case 'call':
+        // WebRTC signalling. Nothing but the handshake travels this way; the
+        // audio and video go straight between the two browsers.
+        void calls.handleCall(frame)
         break
 
       case 'error':
@@ -156,6 +165,8 @@ export function useRealtime() {
     sendTyping: (room: string, on: boolean) => post({ t: 'typing', room, on }),
     sendReceipt: (room: string, wireIds: string[], receipt: 'delivered' | 'read') =>
       post({ t: 'receipt', room, wireIds, status: receipt }),
+    sendCall: (room: string, signal: CallSignal, to?: string) =>
+      post({ t: 'call', room, to, signal }),
   }
 
   return { status, isOnline, me, connect, disconnect, syncRooms, transport }

@@ -2,15 +2,52 @@
 const calls = useCallCenter()
 // `screen` outlives `call` through the closing fade, so the card keeps the
 // name and colours it had while hanging up.
-const { call, screen, status, flags, overlayOpen } = calls
+const { call, screen, status, flags, overlayOpen, localStream, remoteStream, remoteVideo } = calls
 
 const faceEl = ref<HTMLElement | null>(null)
 const endBtn = ref<HTMLElement | null>(null)
+
+/**
+ * Where the call is actually heard and seen.
+ *
+ * The audio element is the only thing that plays sound, and it is mounted for
+ * the whole call — a voice call has no video element to carry it, and a muted
+ * one would be silent. Both video elements are muted for that reason: the
+ * remote picture would otherwise double the audio, and the self view would
+ * feed the microphone straight back.
+ */
+const remoteAudioEl = ref<HTMLAudioElement | null>(null)
+const remoteVideoEl = ref<HTMLVideoElement | null>(null)
+const selfVideoEl = ref<HTMLVideoElement | null>(null)
+
+/** Own camera preview, only once there is a picture to show. */
+const selfVideo = computed(() => !!call.value?.cam && !call.value?.simulated)
+
+function attach(el: HTMLMediaElement | null, stream: MediaStream | null) {
+  if (!el || el.srcObject === stream) return
+  el.srcObject = stream
+  // Autoplay is allowed here — placing or answering a call is the gesture.
+  if (stream) el.play().catch(() => {})
+}
+
+// The video elements come and go with `v-if`, so the streams are re-attached
+// whenever either the element or the stream changes.
+watch([remoteAudioEl, remoteStream], () => attach(remoteAudioEl.value, remoteStream.value), { immediate: true })
+watch([remoteVideoEl, remoteStream], () => attach(remoteVideoEl.value, remoteStream.value), { immediate: true })
+watch([selfVideoEl, localStream], () => attach(selfVideoEl.value, localStream.value), { immediate: true })
 /** Blooms the contact's own colour behind them — WhatsApp blurs their photo
  *  across the whole call screen. */
 const face = ref('')
 
+/** Our own camera: what the self view and the camera button reflect. */
 const cam = computed(() => !!screen.value?.cam)
+
+/**
+ * Whether the screen is a video one at all. Either camera is enough: a voice
+ * call the far end turns a camera on during still has to make room for their
+ * picture, and the card is laid out around the stage being there.
+ */
+const videoMode = computed(() => cam.value || remoteVideo.value)
 
 watch(
   [overlayOpen, () => screen.value?.face.av],
@@ -35,19 +72,44 @@ watch(
     >
       <div
         class="call-card"
-        :class="{ 'is-video': cam }"
+        :class="{ 'is-video': videoMode }"
         :style="face ? { '--face': face } : undefined"
       >
         <div class="call-bg" aria-hidden="true" />
 
-        <!-- The far end's camera. Hidden on a voice call. -->
-        <div v-if="cam" class="call-stage">
-          <div class="avatar" :class="screen?.face.av">{{ screen?.face.initials }}</div>
+        <!-- Their sound, for the whole call — a voice call has no picture to
+             carry it. -->
+        <audio ref="remoteAudioEl" autoplay />
+
+        <!-- The far end's camera. Absent while the call is voice only. -->
+        <div v-if="videoMode" class="call-stage">
+          <video
+            v-show="remoteVideo"
+            ref="remoteVideoEl"
+            class="call-video"
+            autoplay
+            playsinline
+            muted
+          />
+          <div v-show="!remoteVideo" class="avatar" :class="screen?.face.av">
+            {{ screen?.face.initials }}
+          </div>
         </div>
 
+        <!-- Your own picture-in-picture, only while your camera is on. -->
         <div v-if="cam" class="call-self">
-          <span class="material-symbols-outlined">person</span>
-          You
+          <video
+            v-if="selfVideo"
+            ref="selfVideoEl"
+            class="call-video mirror"
+            autoplay
+            playsinline
+            muted
+          />
+          <template v-else>
+            <span class="material-symbols-outlined">person</span>
+            You
+          </template>
         </div>
 
         <div class="call-top">
@@ -59,7 +121,7 @@ watch(
 
         <div class="call-who">
           <div
-            v-show="!cam"
+            v-show="!videoMode"
             ref="faceEl"
             class="avatar"
             :class="[screen?.face.av, { ringing: screen && !screen.connected }]"

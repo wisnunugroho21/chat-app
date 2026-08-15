@@ -5,7 +5,8 @@ export type DeliveryStatus = 'sent' | 'delivered' | 'read'
 
 export type FilterKey = 'all' | 'unread' | 'favourites' | 'groups'
 
-export type CallKind = 'voice' | 'video'
+/** Defined on the wire, because signalling and the UI must agree on it. */
+export type { CallKind } from '#shared/types/wire'
 
 export interface Contact {
   name: string
@@ -83,14 +84,23 @@ export interface CallFace {
 }
 
 export interface Call {
+  /** Who the call screen names — the caller, or the chat being called. */
   name: string
+  /** The conversation the signalling travels through, which for an incoming
+   *  call from a group is not the same as `name`. */
+  room: string
   face: CallFace
   kind: CallKind
   direction: 'in' | 'out'
   secs: number
   muted: boolean
+  /** Our own camera. */
   cam: boolean
+  /** Theirs, as last reported — false paints their avatar over the video. */
+  remoteCam: boolean
   speaker: boolean
   answered: boolean
   connected: boolean
+  /** The demo ringer in the sidebar: a call screen with no peer behind it. */
+  simulated?: boolean
 }

@@ -1,4 +1,4 @@
-import type { ClientMessage, ServerMessage, WireUser } from '#shared/types/wire'
+import type { CallSignal, ClientMessage, ServerMessage, WireUser } from '#shared/types/wire'
 
 /**
  * The realtime socket.
@@ -13,6 +13,8 @@ import type { ClientMessage, ServerMessage, WireUser } from '#shared/types/wire'
  */
 
 const topic = (room: string) => `room:${room}`
+/** Every peer also listens on its own id, so a frame can address one user. */
+const userTopic = (userId: string) => `user:${userId}`
 
 const send = (peer: { send: (data: string) => unknown }, payload: ServerMessage): void => {
   peer.send(JSON.stringify(payload))
@@ -41,6 +43,22 @@ const asUser = (value: unknown): WireUser | null => {
 const asRooms = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter(r => typeof r === 'string' && r).slice(0, 200) : []
 
+const SIGNALS = new Set(['invite', 'ring', 'accept', 'offer', 'answer', 'ice', 'media', 'end'])
+
+/**
+ * Call frames are relayed without being understood — the SDP is a private
+ * matter between two browsers — so this only checks that the envelope is well
+ * formed and that nobody is pushing a megabyte through the socket.
+ */
+function asSignal(value: unknown): CallSignal | null {
+  const signal = value as (CallSignal & { sdp?: unknown }) | undefined
+  if (!signal || typeof signal !== 'object') return null
+  if (typeof signal.s !== 'string' || !SIGNALS.has(signal.s)) return null
+  if (typeof signal.callId !== 'string' || !signal.callId) return null
+  if ('sdp' in signal && (typeof signal.sdp !== 'string' || signal.sdp.length > 64_000)) return null
+  return signal
+}
+
 export default defineWebSocketHandler({
   open() {
     // Nothing to do until `hello` names the peer — `ready` is the reply to it,
@@ -58,6 +76,7 @@ export default defineWebSocketHandler({
       const rooms = asRooms(frame.rooms)
       identify(peer.id, user, rooms)
       for (const room of rooms) peer.subscribe(topic(room))
+      peer.subscribe(userTopic(user.id))
       return send(peer, { t: 'ready', user, rooms })
     }
 
@@ -116,6 +135,22 @@ export default defineWebSocketHandler({
         )
         // So a reload shows the ticks the sender had already earned.
         await saveReceipts(frame.room, wireIds, status)
+        break
+      }
+
+      case 'call': {
+        if (typeof frame.room !== 'string') break
+        const signal = asSignal(frame.signal)
+        if (!signal) break
+        // Routing is the frame's to decide, not ours: addressed to a user, or
+        // to the room when it is an invite looking for whoever picks up.
+        const target = typeof frame.to === 'string' && frame.to
+          ? userTopic(frame.to)
+          : topic(frame.room)
+        peer.publish(
+          target,
+          JSON.stringify({ t: 'call', room: frame.room, from: session.user, signal } satisfies ServerMessage),
+        )
         break
       }
     }

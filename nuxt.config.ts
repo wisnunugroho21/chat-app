@@ -30,6 +30,16 @@ export default defineNuxtConfig({
       privateKey: '',
     },
     public: {
+      // How the two browsers in a call find each other. STUN is enough for
+      // most networks — and for two tabs on one machine, nothing is needed at
+      // all. A TURN relay is what gets a call through symmetric NAT.
+      webrtc: {
+        stunUrls: 'stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302',
+        turnUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+      },
+
       // The Firebase web app config, plus the VAPID key from
       // Project settings → Cloud Messaging → Web Push certificates.
       firebase: {

@@ -1534,6 +1534,21 @@ and a floating capsule of round controls at the bottom.
     font-weight: 400;
 }
 
+/* The live picture, on the stage and in the corner alike. `cover` because a
+   webcam's aspect ratio rarely matches the box it is being put in. */
+.call-video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* Your own preview is a mirror, the way a front camera is expected to be. */
+.call-video.mirror {
+    transform: scaleX(-1);
+}
+
 /* Your own camera, picture-in-picture above the controls */
 .call-self {
     position: absolute;
