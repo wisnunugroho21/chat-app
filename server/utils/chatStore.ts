@@ -1,5 +1,5 @@
-import type { HistoryPayload, ReceiptStatus, StoredMessage, WireUser } from '#shared/types/wire'
-import type { MessageDoc, StoredStatus } from './mongo'
+import type { HistoryPayload, ReceiptStatus, StoredEntry, WireUser } from '#shared/types/wire'
+import type { CallDoc, MessageDoc, StoredStatus } from './mongo'
 
 /**
  * Chats and messages, on disk.
@@ -14,6 +14,8 @@ import type { MessageDoc, StoredStatus } from './mongo'
 const ROOM_LIMIT = 50
 /** And how many messages of each. */
 const MESSAGE_LIMIT = 200
+/** Calls are far rarer than messages, so they need far less room. */
+const CALL_LIMIT = 50
 
 /** Persist one message and fold it into its room's summary. */
 export async function saveMessage(msg: {
@@ -68,6 +70,28 @@ export async function saveMessage(msg: {
 }
 
 /**
+ * Persist one finished call, and let its room float up the chat list with it.
+ * A room that has only ever carried calls gets created here.
+ */
+export async function saveCall(call: CallDoc): Promise<void> {
+  const db = await chatCollections()
+  if (!db) return
+
+  await Promise.all([
+    db.calls.updateOne({ callId: call.callId }, { $setOnInsert: call }, { upsert: true }),
+    db.rooms.updateOne(
+      { name: call.room },
+      {
+        $set: { updatedAt: call.endedAt },
+        $addToSet: { participants: call.from.name },
+        $setOnInsert: { name: call.room, createdAt: call.endedAt },
+      },
+      { upsert: true },
+    ),
+  ])
+}
+
+/**
  * Record a receipt. Status only ever climbs — a `delivered` arriving late from
  * a second device cannot un-read a message.
  */
@@ -97,7 +121,7 @@ export async function saveReceipts(
  * active rooms, and the tail of each one's conversation.
  */
 export async function loadHistory(): Promise<HistoryPayload> {
-  const empty: HistoryPayload = { persisted: false, rooms: [], messages: {} }
+  const empty: HistoryPayload = { persisted: false, rooms: [], entries: {} }
   try {
     const db = await chatCollections()
     if (!db) return empty
@@ -109,27 +133,68 @@ export async function loadHistory(): Promise<HistoryPayload> {
       .toArray()
 
     if (!rooms.length) return { ...empty, persisted: true }
+    const names = rooms.map(r => r.name)
 
-    // One pass over the rooms' messages, sliced to the last N of each — a
+    // One pass per collection, sliced to the last N of each room — a
     // find-per-room would be a query per conversation on every page load.
-    const grouped = await db.messages
-      .aggregate<{ _id: string, messages: MessageDoc[] }>([
-        { $match: { room: { $in: rooms.map(r => r.name) } } },
-        { $sort: { createdAt: 1, _id: 1 } },
-        { $group: { _id: '$room', messages: { $push: '$$ROOT' } } },
-        { $project: { messages: { $slice: ['$messages', -MESSAGE_LIMIT] } } },
-      ])
-      .toArray()
+    const [messages, calls] = await Promise.all([
+      db.messages
+        .aggregate<{ _id: string, rows: MessageDoc[] }>([
+          { $match: { room: { $in: names } } },
+          { $sort: { createdAt: 1, _id: 1 } },
+          { $group: { _id: '$room', rows: { $push: '$$ROOT' } } },
+          { $project: { rows: { $slice: ['$rows', -MESSAGE_LIMIT] } } },
+        ])
+        .toArray(),
+      db.calls
+        .aggregate<{ _id: string, rows: CallDoc[] }>([
+          { $match: { room: { $in: names } } },
+          { $sort: { endedAt: 1, _id: 1 } },
+          { $group: { _id: '$room', rows: { $push: '$$ROOT' } } },
+          { $project: { rows: { $slice: ['$rows', -CALL_LIMIT] } } },
+        ])
+        .toArray(),
+    ])
 
-    const messages: Record<string, StoredMessage[]> = {}
-    for (const group of grouped) {
-      messages[group._id] = group.messages.map(m => ({
-        wireId: m.wireId,
-        from: m.from,
-        text: m.text,
-        time: m.time,
-        status: m.status,
-      }))
+    // Interleaved here rather than in the browser: this is the side holding
+    // the timestamps to interleave them by.
+    const dated = new Map<string, { at: number, entry: StoredEntry }[]>()
+    const push = (room: string, at: Date, entry: StoredEntry) => {
+      const rows = dated.get(room) ?? []
+      rows.push({ at: at.getTime(), entry })
+      dated.set(room, rows)
+    }
+
+    for (const group of messages) {
+      for (const m of group.rows) {
+        push(group._id, m.createdAt, {
+          type: 'msg',
+          wireId: m.wireId,
+          from: m.from,
+          text: m.text,
+          time: m.time,
+          status: m.status,
+        })
+      }
+    }
+
+    for (const group of calls) {
+      for (const c of group.rows) {
+        push(group._id, c.endedAt, {
+          type: 'call',
+          callId: c.callId,
+          from: c.from,
+          kind: c.kind,
+          outcome: c.outcome,
+          secs: c.secs,
+          at: c.endedAt.toISOString(),
+        })
+      }
+    }
+
+    const entries: Record<string, StoredEntry[]> = {}
+    for (const [room, rows] of dated) {
+      entries[room] = rows.sort((a, b) => a.at - b.at).map(row => row.entry)
     }
 
     return {
@@ -141,7 +206,7 @@ export async function loadHistory(): Promise<HistoryPayload> {
         lastFrom: r.lastFrom ?? '',
         lastTime: r.lastTime ?? '',
       })),
-      messages,
+      entries,
     }
   }
   catch (error) {

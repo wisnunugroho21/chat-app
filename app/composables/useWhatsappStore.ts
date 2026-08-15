@@ -56,6 +56,10 @@ function seedThreads(): Record<string, Message[]> {
 export function useWhatsappStore() {
   const { showPane } = useWhatsappLayout()
   const { announce } = useWhatsappOverlays()
+  const { me } = useIdentity()
+
+  /** Is that name us? Empty during SSR, where nobody has an identity yet. */
+  const isMe = (name: string) => sameName(name, me.value.name)
 
   const chats = useState<Chat[]>('wa:chats', () => CHATS.map(c => ({ ...c })))
   const threads = useState<Record<string, Message[]>>('wa:threads', seedThreads)
@@ -97,6 +101,8 @@ export function useWhatsappStore() {
 
   function ensureChat(seed: {
     name: string
+    /** Only needed when the room key would read as our own name. */
+    title?: string
     av?: AvatarTone
     sub?: string
     preview?: string
@@ -107,6 +113,7 @@ export function useWhatsappStore() {
     if (!existing) {
       const chat: Chat = {
         name: seed.name,
+        title: seed.title,
         av: seed.av || 'a2',
         group: !!seed.group,
         sub: seed.sub || 'online',
@@ -119,12 +126,20 @@ export function useWhatsappStore() {
       return chat
     }
     // Refresh metadata the caller knows more about than we do.
+    if (seed.title) existing.title = seed.title
     if (seed.av) existing.av = seed.av
     if (seed.sub) existing.sub = seed.sub
     if (seed.group !== undefined) existing.group = seed.group
     bumpToTop(existing)
     return existing
   }
+
+  /**
+   * A label for a room whose key is our own name, given somebody known to be
+   * on the other end. Undefined for every ordinary room, which needs none.
+   */
+  const titleFor = (room: string, other: string | undefined) =>
+    isMe(room) && other && !isMe(other) ? other : undefined
 
   function setPreview(name: string, text: string, icon?: string) {
     const chat = chatByName(name)
@@ -167,8 +182,9 @@ export function useWhatsappStore() {
     return chats.value.filter((c) => {
       if (!keep(c)) return false
       if (!q) return true
+      // Searched by what the row says, not by the room key behind it.
       return (
-        c.name.toLowerCase().includes(q)
+        chatTitle(c).toLowerCase().includes(q)
         || (c.preview || '').toLowerCase().includes(q)
         || messageHits(c.name, q) > 0
       )
@@ -222,7 +238,7 @@ export function useWhatsappStore() {
     const { room, from, text } = frame
 
     // A message from someone not in the list opens a conversation for them.
-    const chat = ensureChat({ name: room })
+    const chat = ensureChat({ name: room, title: titleFor(room, from.name) })
     const msgs = threadOf(room)
 
     if (msgs.some(m => m.wireId === frame.wireId)) return // socket replay
@@ -236,15 +252,17 @@ export function useWhatsappStore() {
   }
 
   /**
-   * Fold stored history into the seeded threads, once, at boot.
+   * Fold stored history — messages and calls alike — into the seeded threads,
+   * once, at boot.
    *
-   * The seeds stay where they are and persisted messages land after them —
-   * they are the newer half of the conversation, and nothing seeded carries a
-   * `wireId`, so the two can never collide. Anything already in the thread
-   * (a socket frame that beat the fetch) is skipped by `wireId`.
+   * The seeds stay where they are and persisted entries land after them: they
+   * are the newer half of the conversation, and nothing seeded carries an id,
+   * so the two can never collide. Anything already in the thread (a socket
+   * frame that beat the fetch, or a call this tab just logged) is skipped by
+   * that id.
    *
-   * Which bubbles are ours is decided here rather than on the server: the
-   * reply carries every message's sender, and `meId` is this device.
+   * Whose entries are ours is decided here rather than on the server: every
+   * row carries who sent or placed it, and `meId` is this device.
    */
   function hydrate(payload: HistoryPayload, meId: string) {
     if (!payload?.persisted) return
@@ -259,6 +277,9 @@ export function useWhatsappStore() {
       const known = chatByName(room.name)
       const chat = ensureChat({
         name: room.name,
+        // A room keyed by our own name is someone else's label for a one-to-one
+        // conversation; show it as whoever else has spoken in it.
+        title: titleFor(room.name, room.participants.find(p => !isMe(p))),
         // Only caption rooms we are meeting for the first time; a seeded chat
         // already has a better sub-line than a list of names.
         group: known ? undefined : room.participants.length > 2,
@@ -266,32 +287,68 @@ export function useWhatsappStore() {
       })
 
       const msgs = threadOf(room.name)
-      const seen = new Set(msgs.map(m => m.wireId).filter(Boolean))
-      let last: Message | null = null
+      const seen = new Set<string>()
+      for (const m of msgs) {
+        if (m.wireId) seen.add(m.wireId)
+        if (m.callId) seen.add(m.callId)
+      }
 
-      for (const stored of payload.messages[room.name] ?? []) {
-        if (seen.has(stored.wireId)) continue
-        seen.add(stored.wireId)
+      /** What the chat row should end up mirroring: the newest entry. */
+      let last: { preview: string, icon: string, status?: DeliveryStatus, time: string } | null = null
 
-        const out = stored.from.id === meId
-        const msg: Message = {
-          id: id++,
-          wireId: stored.wireId,
-          text: stored.text,
-          time: stored.time,
-          // Ticks belong to our own bubbles; a sender label to everyone else's.
-          ...(out ? { out: true, status: stored.status } : { from: stored.from.name }),
+      // Optional-chained on purpose: a browser left open across a deploy can
+      // be handed a reply from a server that predates this shape.
+      for (const entry of payload.entries?.[room.name] ?? []) {
+        const key = entry.type === 'msg' ? entry.wireId : entry.callId
+        if (seen.has(key)) continue
+        seen.add(key)
+
+        if (entry.type === 'call') {
+          // Composed from the stored facts, so it reads the same as it did
+          // while the call was hanging up.
+          const view = callLogView({
+            kind: entry.kind,
+            outcome: entry.outcome,
+            secs: entry.secs,
+            mine: entry.from.id === meId,
+          })
+          const time = clockAt(entry.at)
+          msgs.push({
+            id: id++,
+            callId: entry.callId,
+            kind: 'call',
+            text: view.text,
+            icon: view.icon,
+            missed: view.missed,
+            time,
+          })
+          last = { preview: view.preview, icon: view.icon, time }
+          continue
         }
-        msgs.push(msg)
-        last = msg
+
+        const out = entry.from.id === meId
+        msgs.push({
+          id: id++,
+          wireId: entry.wireId,
+          text: entry.text,
+          time: entry.time,
+          // Ticks belong to our own bubbles; a sender label to everyone else's.
+          ...(out ? { out: true, status: entry.status } : { from: entry.from.name }),
+        })
+        last = {
+          preview: out || !chat.group ? entry.text : `${entry.from.name}: ${entry.text}`,
+          icon: out ? 'done_all' : '',
+          status: out ? entry.status : undefined,
+          time: entry.time,
+        }
       }
 
       if (!last) continue
 
-      // The row mirrors the newest message — with its stored clock, not now.
-      chat.preview = last.out || !chat.group ? last.text! : `${last.from}: ${last.text}`
-      chat.icon = last.out ? 'done_all' : ''
-      if (last.out) chat.status = last.status
+      // The row mirrors the newest entry — with its stored clock, not now.
+      chat.preview = last.preview
+      chat.icon = last.icon
+      if (last.status) chat.status = last.status
       if (last.time) chat.time = last.time
     }
   }
@@ -351,7 +408,15 @@ export function useWhatsappStore() {
   /** Append a call entry to a thread and mirror it in the chat list. */
   function logCall(
     name: string,
-    detail: { kind: 'voice' | 'video', text: string, missed?: boolean, preview?: string, av?: AvatarTone },
+    detail: {
+      kind: 'voice' | 'video'
+      text: string
+      missed?: boolean
+      preview?: string
+      av?: AvatarTone
+      /** Who was on the other end, for a room keyed by our own name. */
+      other?: string
+    },
   ) {
     const icon = detail.missed
       ? 'phone_missed'
@@ -369,10 +434,10 @@ export function useWhatsappStore() {
       time: clockNow(),
     })
 
-    ensureChat({ name, av: detail.av })
+    const chat = ensureChat({ name, av: detail.av, title: titleFor(name, detail.other) })
     setPreview(name, detail.preview || detail.text, icon)
     if (detail.missed) bumpUnread(name)
-    if (name !== current.value) announce(`${name}: ${detail.text}`)
+    if (name !== current.value) announce(`${chatTitle(chat)}: ${detail.text}`)
   }
 
   return {

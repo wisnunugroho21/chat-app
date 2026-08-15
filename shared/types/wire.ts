@@ -59,7 +59,9 @@ export type CallSignal =
   | { s: 'ice', callId: string, candidate: IceCandidateWire }
   /** Camera on or off, so the far end knows to show the avatar instead. */
   | { s: 'media', callId: string, cam: boolean }
-  | { s: 'end', callId: string, reason: CallEndReason }
+  /** `secs` is the hanging-up side's own clock — the only honest measure of
+   *  how long the call lasted, and what the log is written from. */
+  | { s: 'end', callId: string, reason: CallEndReason, secs?: number }
 
 export type ClientMessage =
   /** First frame on every connection: who I am and what I am listening to. */
@@ -100,6 +102,48 @@ export interface StoredMessage {
   status: 'sent' | ReceiptStatus
 }
 
+/**
+ * How a call finished. The record keeps the fact, not the wording: the same
+ * unanswered call reads "Unanswered" to whoever placed it and "Missed" to
+ * whoever did not, so the sentence is composed per reader.
+ */
+export type CallOutcome =
+  | 'answered'
+  | 'missed'
+  | 'declined'
+  | 'cancelled'
+  | 'busy'
+  | 'failed'
+
+/** The client and the server must agree on this, so it lives with the wire. */
+export function callOutcome(reason: CallEndReason, connected: boolean): CallOutcome {
+  if (connected) return 'answered'
+  if (reason === 'declined') return 'declined'
+  if (reason === 'no-answer') return 'missed'
+  if (reason === 'busy') return 'busy'
+  if (reason === 'failed') return 'failed'
+  return 'cancelled'
+}
+
+export interface StoredCall {
+  callId: string
+  /** Who placed it — which is how a reader knows if it was theirs. */
+  from: WireUser
+  kind: CallKind
+  outcome: CallOutcome
+  secs: number
+  /** When it ended, ISO. Formatted to a clock label by the reader's browser. */
+  at: string
+}
+
+/**
+ * One row of a stored conversation. Messages and calls are interleaved by the
+ * server, which is the side holding the timestamps to interleave them by.
+ */
+export type StoredEntry =
+  | ({ type: 'msg' } & StoredMessage)
+  | ({ type: 'call' } & StoredCall)
+
 export interface StoredRoom {
   name: string
   /** Display names seen sending here; captions a group's sub-line. */
@@ -114,5 +158,5 @@ export interface HistoryPayload {
   persisted: boolean
   rooms: StoredRoom[]
   /** Oldest first, keyed by room. */
-  messages: Record<string, StoredMessage[]>
+  entries: Record<string, StoredEntry[]>
 }

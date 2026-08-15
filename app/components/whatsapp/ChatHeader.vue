@@ -4,9 +4,11 @@ const calls = useCallCenter()
 const { showPane } = useWhatsappLayout()
 const { openMenu, say, busy } = useWhatsappOverlays()
 
-const { currentChat, current } = store
+const { currentChat } = store
 
 const label = computed(() => (currentChat.value ? faceInitials(currentChat.value) : ''))
+/** What this conversation is called, which is not always its room key. */
+const title = computed(() => (currentChat.value ? chatTitle(currentChat.value) : ''))
 
 /** Reload the open conversation. */
 function chatMenu(event: MouseEvent) {
@@ -14,7 +16,7 @@ function chatMenu(event: MouseEvent) {
     {
       icon: 'refresh',
       label: 'Refresh',
-      run: anchor => busy(anchor, () => say(`Chat dengan ${current.value} dimuat ulang`)),
+      run: anchor => busy(anchor, () => say(`Chat dengan ${title.value} dimuat ulang`)),
     },
   ])
 }
@@ -34,7 +36,7 @@ function chatMenu(event: MouseEvent) {
     <WhatsappAvatar v-if="currentChat" :tone="currentChat.av" :label="label" />
 
     <div class="ch-info">
-      <div class="ch-name">{{ currentChat?.name }}</div>
+      <div class="ch-name">{{ title }}</div>
       <div class="ch-sub">{{ currentChat?.sub || 'online' }}</div>
     </div>
 

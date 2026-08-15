@@ -48,7 +48,7 @@ function onKeydown(event: KeyboardEvent) {
 
     <div class="ci-body">
       <div class="ci-name">
-        <WhatsappHighlightText :text="chat.name" :query="query" />
+        <WhatsappHighlightText :text="chatTitle(chat)" :query="query" />
       </div>
       <div class="ci-time" :style="chat.unread ? 'color: var(--accent)' : undefined">
         {{ chat.time }}
@@ -69,7 +69,7 @@ function onKeydown(event: KeyboardEvent) {
     <button
       class="row-menu"
       type="button"
-      :aria-label="`Options for ${chat.name}`"
+      :aria-label="`Options for ${chatTitle(chat)}`"
       aria-haspopup="menu"
       aria-expanded="false"
       @click.stop="emit('menu', $event.currentTarget as HTMLElement)"

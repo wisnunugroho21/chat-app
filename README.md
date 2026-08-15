@@ -28,8 +28,16 @@ Three collections, created with their indexes on first connect:
 | Collection | Holds |
 | ---------- | ----- |
 | `messages` | one document per message, keyed by its unique `wireId`, with delivery status |
+| `calls`    | one per finished call, keyed by `callId`: who placed it, how it ended, how long it ran |
 | `rooms`    | one per conversation: participants seen, and the newest message for the chat list |
 | `tokens`   | FCM registration tokens and the rooms each one listens to |
+
+Call logs are written by the server, from the signalling that already passes
+through it — one `end` frame is sent per call, so there is one record per call
+however many browsers were involved. The record keeps the facts rather than a
+sentence, because the same unanswered call reads "Unanswered" to whoever placed
+it and "Missed" to whoever did not; each browser composes its own wording when
+the history loads.
 
 ## Calling
 

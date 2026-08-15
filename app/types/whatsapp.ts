@@ -15,7 +15,17 @@ export interface Contact {
 }
 
 export interface Chat {
+  /** The room key: how this conversation is addressed on the wire. */
   name: string
+  /**
+   * What to show instead of `name`, when the key is a poor label.
+   *
+   * A one-to-one room is keyed by whatever the person who started it called
+   * the conversation — which, on the other side, is that person's own name.
+   * Nobody should see a chat with themselves in their list, so the row is
+   * labelled with whoever is actually on the other end.
+   */
+  title?: string
   av: AvatarTone
   /** Overrides the initials derived from the name. */
   initials?: string
@@ -50,6 +60,8 @@ export interface Message {
   id: number
   /** Globally unique id carried over the wire; receipts address it. */
   wireId?: string
+  /** Set on a `call` entry, so a rehydrated log is not filed twice. */
+  callId?: string
   kind?: 'day' | 'call' | 'typing'
   label?: string
   text?: string

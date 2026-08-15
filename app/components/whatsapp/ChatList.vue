@@ -14,20 +14,23 @@ const nothingHere = computed(
 
 /** Options for one conversation row. */
 function rowMenu(anchor: HTMLElement, name: string) {
-  const faved = !!store.chatByName(name)?.fav
+  const chat = store.chatByName(name)
+  const faved = !!chat?.fav
+  // Addressed by the room key, spoken about by what the row is called.
+  const label = chat ? chatTitle(chat) : name
   const items: MenuItem[] = [
     {
       icon: faved ? 'heart_minus' : 'favorite',
       label: faved ? 'Remove from favourites' : 'Add to favourites',
       run: () => {
         const now = store.toggleFavourite(name)
-        say(now ? `${name} ditambahkan ke favorit` : `${name} dihapus dari favorit`)
+        say(now ? `${label} ditambahkan ke favorit` : `${label} dihapus dari favorit`)
       },
     },
     {
       icon: 'refresh',
       label: 'Refresh',
-      run: a => busy(a, () => say(`${name} dimuat ulang`)),
+      run: a => busy(a, () => say(`${label} dimuat ulang`)),
     },
   ]
   openMenu(anchor, items)

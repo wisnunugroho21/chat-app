@@ -14,10 +14,14 @@ export const SLIDE_MS = 220
 
 export function useNewChatPanel() {
   const store = useWhatsappStore()
+  const { me } = useIdentity()
+
+  /** Everyone but us: you cannot start a conversation with yourself. */
+  const others = computed(() => CONTACTS.filter(c => !sameName(c.name, me.value.name)))
 
   const results = computed(() => {
     const q = search.value.trim().toLowerCase()
-    return CONTACTS.filter(c => c.name.toLowerCase().includes(q))
+    return others.value.filter(c => c.name.toLowerCase().includes(q))
   })
 
   /** Contacts grouped under their initial letter, in list order. */
@@ -36,7 +40,7 @@ export function useNewChatPanel() {
 
   const subtitle = computed(() => {
     if (groupMode.value && selected.value.size)
-      return `${selected.value.size} of ${CONTACTS.length} selected`
+      return `${selected.value.size} of ${others.value.length} selected`
     return groupMode.value
       ? 'Add members, then name the group'
       : 'Pick someone to message'
@@ -107,7 +111,7 @@ export function useNewChatPanel() {
   }
 
   return {
-    contacts: CONTACTS,
+    contacts: others,
     open,
     groupMode,
     search,

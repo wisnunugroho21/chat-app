@@ -151,6 +151,9 @@ export default defineWebSocketHandler({
           target,
           JSON.stringify({ t: 'call', room: frame.room, from: session.user, signal } satisfies ServerMessage),
         )
+        // Relay first, then write the log — the far end should not wait on
+        // the database to hear a phone ring.
+        await recordCallSignal(frame.room, session.user, signal)
         break
       }
     }

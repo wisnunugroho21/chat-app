@@ -1,6 +1,6 @@
 import { MongoClient } from 'mongodb'
 import type { Collection, Db } from 'mongodb'
-import type { ReceiptStatus, WireUser } from '#shared/types/wire'
+import type { CallKind, CallOutcome, ReceiptStatus, WireUser } from '#shared/types/wire'
 
 /**
  * The MongoDB connection, shared by everything on the server that stores
@@ -30,14 +30,31 @@ export interface MessageDoc {
   createdAt: Date
 }
 
-/** One conversation. Rebuilt from the messages that pass through it. */
+/**
+ * One finished call. Written by the server from the signalling it already
+ * relays, so there is a single writer and both ends read the same record.
+ */
+export interface CallDoc {
+  callId: string
+  room: string
+  /** Who placed it. */
+  from: WireUser
+  kind: CallKind
+  outcome: CallOutcome
+  secs: number
+  startedAt: Date
+  endedAt: Date
+}
+
+/** One conversation. Rebuilt from the messages and calls that pass through. */
 export interface RoomDoc {
   name: string
   /** Display names seen sending here — enough to caption a group. */
   participants: string[]
-  lastText: string
-  lastFrom: string
-  lastTime: string
+  /** Absent in a room that has only ever carried calls. */
+  lastText?: string
+  lastFrom?: string
+  lastTime?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -52,6 +69,7 @@ export interface TokenDoc {
 
 export interface ChatCollections {
   messages: Collection<MessageDoc>
+  calls: Collection<CallDoc>
   rooms: Collection<RoomDoc>
   tokens: Collection<TokenDoc>
 }
@@ -100,6 +118,8 @@ async function ensureIndexes(db: Db) {
   await Promise.all([
     db.collection<MessageDoc>('messages').createIndex({ wireId: 1 }, { unique: true }),
     db.collection<MessageDoc>('messages').createIndex({ room: 1, createdAt: 1 }),
+    db.collection<CallDoc>('calls').createIndex({ callId: 1 }, { unique: true }),
+    db.collection<CallDoc>('calls').createIndex({ room: 1, endedAt: 1 }),
     db.collection<RoomDoc>('rooms').createIndex({ name: 1 }, { unique: true }),
     db.collection<RoomDoc>('rooms').createIndex({ updatedAt: -1 }),
     db.collection<TokenDoc>('tokens').createIndex({ token: 1 }, { unique: true }),
@@ -129,6 +149,7 @@ export async function chatCollections(): Promise<ChatCollections | null> {
   if (!db) return null
   return {
     messages: db.collection<MessageDoc>('messages'),
+    calls: db.collection<CallDoc>('calls'),
     rooms: db.collection<RoomDoc>('rooms'),
     tokens: db.collection<TokenDoc>('tokens'),
   }

@@ -1,5 +1,6 @@
 import { CONTACTS } from '~/data/contacts'
 import type { Call, CallFace, CallKind } from '~/types/whatsapp'
+import { callOutcome } from '#shared/types/wire'
 import type { CallEndReason, CallSignal, IceCandidateWire, ServerMessage } from '#shared/types/wire'
 
 /**
@@ -155,11 +156,15 @@ export function useCallCenter() {
     forget()
     callId = newWireId()
 
-    const name = store.current.value
+    // Addressed by the room key, but announced by what the chat is called —
+    // which for a one-to-one room is not the same string.
+    const room = store.current.value
+    const chat = store.chatByName(room)
+    const name = chat ? chatTitle(chat) : room
     call.value = {
       name,
-      room: name,
-      face: faceOf(name),
+      room,
+      face: faceOf(room),
       kind,
       direction: 'out',
       secs: 0,
@@ -355,13 +360,19 @@ export function useCallCenter() {
 
     // Tell the other end, unless they are the ones who just told us. With no
     // peer yet it goes to the room, so every device that is ringing stops.
-    if (!opts.remote) emit({ s: 'end', callId, reason })
+    // `secs` rides along: the server writes the log from it, and this side's
+    // clock is the one that was actually counting.
+    if (!opts.remote) emit({ s: 'end', callId, reason, secs: live.secs })
     peer.close()
     forget()
 
     // Logged against the conversation, not the person, so both ends file the
     // call in the same place — and next to the messages about it.
     const { room, kind, direction, secs, connected, answered } = live
+    // The same shape the server stores and a reload reads back, so a call
+    // says the same thing before and after it becomes history.
+    const outcome = callOutcome(reason, connected)
+    const view = callLogView({ kind, outcome, secs, mine: direction === 'out' })
 
     // Never picked up: no call screen was ever shown.
     if (direction === 'in' && !answered) {
@@ -370,39 +381,30 @@ export function useCallCenter() {
       call.value = null
       store.logCall(room, {
         kind,
-        missed: true,
+        missed: view.missed,
         av: faceOf(room).av,
-        text: reason === 'declined' ? `Declined ${kind} call` : `Missed ${kind} call`,
+        text: view.text,
+        other: live.name,
       })
       return
     }
 
-    status.value = connected ? 'Call ended' : endedLabel(reason)
+    status.value = connected ? 'Call ended' : callOutcomeLabel(outcome, direction === 'out')
     const closing = seq
     ended.value = live
     call.value = null
     store.logCall(room, {
       kind,
-      missed: !connected,
+      missed: view.missed,
       av: faceOf(room).av,
-      text: connected
-        ? `${kind === 'video' ? 'Video' : 'Voice'} call · ${callDuration(secs)}`
-        : `${endedLabel(reason)} ${kind} call`,
-      preview: connected ? callDuration(secs) : undefined,
+      text: view.text,
+      preview: view.preview,
+      other: live.name,
     })
     at(() => {
       if (seq !== closing) return
       overlayOpen.value = false
     }, motionMs(850))
-  }
-
-  /** How a call that never connected is described, to the screen and the log. */
-  function endedLabel(reason: CallEndReason): string {
-    if (reason === 'declined') return 'Declined'
-    if (reason === 'no-answer') return 'Unanswered'
-    if (reason === 'busy') return 'Busy'
-    if (reason === 'failed') return 'Failed'
-    return 'Cancelled'
   }
 
   /** Escape hangs up, or declines a call that was never answered. */
