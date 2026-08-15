@@ -177,7 +177,7 @@ async function pushToRoom(room: string, from: WireUser, text: string, wireId: st
       tokens,
       title: room,
       body: `${from.name}: ${text}`,
-      data: { room, from: from.name, wireId },
+      data: { room, from: from.name, fromId: from.id, wireId },
     })
   }
   catch (error) {

@@ -6,6 +6,11 @@ const { current, currentChat, currentThread } = store
 
 const scroller = ref<HTMLElement | null>(null)
 
+/** Spoken about by name, not by the room key that addresses it. */
+const title = computed(() =>
+  currentChat.value ? chatTitle(currentChat.value) : current.value,
+)
+
 /**
  * Turns the raw thread into the rows the template paints: day pills, the
  * encryption notice, bubbles with their grouping flags, and the typing
@@ -126,7 +131,7 @@ onMounted(scrollToBottom)
 
       <div v-else-if="entry.type === 'empty'" class="empty-note">
         <span class="material-symbols-outlined">forum</span>
-        <p>Belum ada pesan dengan <b>{{ current }}</b>. Tulis sesuatu di bawah untuk memulai.</p>
+        <p>Belum ada pesan dengan <b>{{ title }}</b>. Tulis sesuatu di bawah untuk memulai.</p>
       </div>
 
       <WhatsappMessageBubble

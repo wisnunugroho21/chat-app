@@ -10,12 +10,13 @@ const TYPING_IDLE_MS = 2500
 let typing = false
 let idleTimer: ReturnType<typeof setTimeout> | null = null
 
-function stopTyping() {
+/** `room` names the conversation being told, which is not always the open one. */
+function stopTyping(room?: string) {
   if (idleTimer) clearTimeout(idleTimer)
   idleTimer = null
   if (!typing) return
   typing = false
-  store.notifyTyping(false)
+  store.notifyTyping(false, room)
 }
 
 function onInput() {
@@ -34,9 +35,10 @@ function send() {
   draft.value = ''
 }
 
-// Switching conversations must not leave a typing bubble behind in the old one.
-watch(() => store.current.value, stopTyping)
-onBeforeUnmount(stopTyping)
+// Switching conversations must not leave a typing bubble behind in the old
+// one — so it is the chat we just left that has to be told, by name.
+watch(() => store.current.value, (_next, previous) => stopTyping(previous))
+onBeforeUnmount(() => stopTyping())
 
 // Opening a chat, and sending, both hand the caret back to the message box.
 watch(composerFocus, async () => {

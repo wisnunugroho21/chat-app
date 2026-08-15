@@ -384,9 +384,13 @@ export function useWhatsappStore() {
     if (wireIds.length) transport.value?.sendReceipt(room, wireIds, 'delivered')
   }
 
-  /** Broadcast our own typing state for the open conversation. */
-  function notifyTyping(on: boolean) {
-    transport.value?.sendTyping(current.value, on)
+  /**
+   * Broadcast our own typing state. Defaults to the open conversation, but
+   * takes a room explicitly: leaving a chat has to tell the one being left,
+   * and by then `current` is already pointing somewhere else.
+   */
+  function notifyTyping(on: boolean, room = current.value) {
+    transport.value?.sendTyping(room, on)
   }
 
   /**

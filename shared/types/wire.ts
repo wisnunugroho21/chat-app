@@ -81,10 +81,17 @@ export type ServerMessage =
   | { t: 'call', room: string, from: WireUser, signal: CallSignal }
   | { t: 'error', message: string }
 
-/** Payload carried by an FCM push so the click can open the right chat. */
+/**
+ * Payload carried by an FCM push so the click can open the right chat.
+ *
+ * `fromId` is the sender's identity, not their name: a foreground push is
+ * folded into the thread like any other message, and that needs the same id
+ * the socket would have carried, to tell whose bubble it is.
+ */
 export interface PushData {
   room: string
   from: string
+  fromId: string
   wireId: string
 }
 

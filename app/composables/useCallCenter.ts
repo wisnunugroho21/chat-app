@@ -281,6 +281,10 @@ export function useCallCenter() {
     const live = call.value
 
     if (signal.s === 'invite') {
+      // The same invite again — a reconnect draining its outbox, say. This is
+      // the call we are already in, not a second caller to turn away.
+      if (live && signal.callId === callId) return
+
       // Busy, or already talking to somebody else: turn them away rather than
       // leave a phone ringing at an end that will never pick up.
       if (live) {

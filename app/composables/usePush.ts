@@ -17,6 +17,8 @@ export type PushState = 'unsupported' | 'unconfigured' | 'idle' | 'denied' | 're
 const state = ref<PushState>('idle')
 const token = ref<string | null>(null)
 let messaging: Messaging | null = null
+/** Whether the foreground listener is already attached to this tab. */
+let listening = false
 
 export function usePush() {
   const store = useWhatsappStore()
@@ -99,17 +101,22 @@ export function usePush() {
     })
 
     // Foreground delivery: the worker stays quiet, so fold it into the thread.
-    onMessage(fcm, (payload) => {
-      const data = payload.data as unknown as PushData | undefined
-      if (!data?.room || !data.wireId) return
-      store.receiveMessage({
-        room: data.room,
-        from: { id: data.wireId, name: data.from },
-        wireId: data.wireId,
-        text: payload.notification?.body?.replace(`${data.from}: `, '') ?? '',
-        time: clockNow(),
+    // Attached once per tab — turning notifications off and on again calls
+    // this a second time, and a second listener would double every message.
+    if (!listening) {
+      listening = true
+      onMessage(fcm, (payload) => {
+        const data = payload.data as unknown as PushData | undefined
+        if (!data?.room || !data.wireId) return
+        store.receiveMessage({
+          room: data.room,
+          from: { id: data.fromId || '', name: data.from },
+          wireId: data.wireId,
+          text: payload.notification?.body?.replace(`${data.from}: `, '') ?? '',
+          time: clockNow(),
+        })
       })
-    })
+    }
 
     state.value = 'ready'
     return true
