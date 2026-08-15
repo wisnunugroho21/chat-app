@@ -8,6 +8,6 @@ export default defineEventHandler(async (event) => {
   if (!body?.token) {
     throw createError({ statusCode: 400, statusMessage: 'token is required' })
   }
-  unregisterToken(body.token)
+  await unregisterToken(body.token)
   return { ok: true }
 })

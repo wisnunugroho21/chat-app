@@ -15,6 +15,13 @@ export default defineNuxtConfig({
   },
 
   runtimeConfig: {
+    // Where chats, messages and push tokens are stored. Absent = memory only,
+    // so the app still runs — it just starts empty after every restart.
+    mongodb: {
+      uri: '',
+      db: 'chat-app',
+    },
+
     // Service account for the FCM HTTP v1 API. Absent = push disabled, and
     // the socket carries everything on its own.
     fcm: {

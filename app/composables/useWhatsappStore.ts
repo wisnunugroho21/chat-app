@@ -7,7 +7,7 @@ import type {
   FilterKey,
   Message,
 } from '~/types/whatsapp'
-import type { ReceiptStatus, WireUser } from '#shared/types/wire'
+import type { HistoryPayload, ReceiptStatus, WireUser } from '#shared/types/wire'
 
 /**
  * How the store reaches the network. `useRealtime` installs one of these at
@@ -235,6 +235,67 @@ export function useWhatsappStore() {
     if (room !== current.value) announce(`${from.name}: ${text}`)
   }
 
+  /**
+   * Fold stored history into the seeded threads, once, at boot.
+   *
+   * The seeds stay where they are and persisted messages land after them —
+   * they are the newer half of the conversation, and nothing seeded carries a
+   * `wireId`, so the two can never collide. Anything already in the thread
+   * (a socket frame that beat the fetch) is skipped by `wireId`.
+   *
+   * Which bubbles are ours is decided here rather than on the server: the
+   * reply carries every message's sender, and `meId` is this device.
+   */
+  function hydrate(payload: HistoryPayload, meId: string) {
+    if (!payload?.persisted) return
+
+    // Ids are handed out once instead of per message: `nextId` walks every
+    // thread, and history arrives in the hundreds.
+    let id = nextId()
+
+    // Oldest activity first, because each `ensureChat` bumps its row to the
+    // top — so the list lands newest-first without a second sort.
+    for (const room of [...payload.rooms].reverse()) {
+      const known = chatByName(room.name)
+      const chat = ensureChat({
+        name: room.name,
+        // Only caption rooms we are meeting for the first time; a seeded chat
+        // already has a better sub-line than a list of names.
+        group: known ? undefined : room.participants.length > 2,
+        sub: known || room.participants.length < 2 ? undefined : room.participants.join(', '),
+      })
+
+      const msgs = threadOf(room.name)
+      const seen = new Set(msgs.map(m => m.wireId).filter(Boolean))
+      let last: Message | null = null
+
+      for (const stored of payload.messages[room.name] ?? []) {
+        if (seen.has(stored.wireId)) continue
+        seen.add(stored.wireId)
+
+        const out = stored.from.id === meId
+        const msg: Message = {
+          id: id++,
+          wireId: stored.wireId,
+          text: stored.text,
+          time: stored.time,
+          // Ticks belong to our own bubbles; a sender label to everyone else's.
+          ...(out ? { out: true, status: stored.status } : { from: stored.from.name }),
+        }
+        msgs.push(msg)
+        last = msg
+      }
+
+      if (!last) continue
+
+      // The row mirrors the newest message — with its stored clock, not now.
+      chat.preview = last.out || !chat.group ? last.text! : `${last.from}: ${last.text}`
+      chat.icon = last.out ? 'done_all' : ''
+      if (last.out) chat.status = last.status
+      if (last.time) chat.time = last.time
+    }
+  }
+
   /** Advance the ticks on our own bubbles. Status never walks backwards. */
   function applyReceipt(room: string, wireIds: string[], status: ReceiptStatus) {
     const msgs = threads.value[room]
@@ -340,6 +401,7 @@ export function useWhatsappStore() {
     dropTyping,
     logCall,
     // Realtime seam
+    hydrate,
     receiveMessage,
     applyReceipt,
     markRead,

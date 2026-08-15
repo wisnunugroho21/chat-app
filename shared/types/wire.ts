@@ -36,3 +36,34 @@ export interface PushData {
   from: string
   wireId: string
 }
+
+/* -------------------------------------------------------------------------
+ * Stored history — what `GET /api/history` hands a booting tab so a reload
+ * comes back to the conversation instead of the seed data. Same shapes the
+ * socket uses, with the delivery state the server has recorded since.
+ * ---------------------------------------------------------------------- */
+
+export interface StoredMessage {
+  wireId: string
+  from: WireUser
+  text: string
+  time: string
+  status: 'sent' | ReceiptStatus
+}
+
+export interface StoredRoom {
+  name: string
+  /** Display names seen sending here; captions a group's sub-line. */
+  participants: string[]
+  lastText: string
+  lastFrom: string
+  lastTime: string
+}
+
+export interface HistoryPayload {
+  /** False when no database is configured — the response is then empty. */
+  persisted: boolean
+  rooms: StoredRoom[]
+  /** Oldest first, keyed by room. */
+  messages: Record<string, StoredMessage[]>
+}

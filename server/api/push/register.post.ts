@@ -21,7 +21,7 @@ export default defineEventHandler(async (event) => {
     ? body.rooms.filter(r => typeof r === 'string' && r).slice(0, 200)
     : []
 
-  registerToken(body.token, { id: body.user.id, name: body.user.name }, rooms)
+  await registerToken(body.token, { id: body.user.id, name: body.user.name }, rooms)
 
   return { ok: true, rooms: rooms.length }
 })

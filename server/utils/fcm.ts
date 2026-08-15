@@ -78,7 +78,7 @@ export async function sendChatPush(push: ChatPush) {
         || code === 'messaging/invalid-argument'
     return gone ? [push.tokens[i]!] : []
   })
-  if (dead.length) pruneTokens(dead)
+  if (dead.length) await pruneTokens(dead)
 
   return { sent: response.successCount, skipped: false, dead: dead.length }
 }
