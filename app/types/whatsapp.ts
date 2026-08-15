@@ -47,6 +47,8 @@ export interface Quote {
  */
 export interface Message {
   id: number
+  /** Globally unique id carried over the wire; receipts address it. */
+  wireId?: string
   kind?: 'day' | 'call' | 'typing'
   label?: string
   text?: string

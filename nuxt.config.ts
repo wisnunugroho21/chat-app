@@ -8,6 +8,34 @@ export default defineNuxtConfig({
     '~/assets/css/whatsapp.css',
   ],
 
+  nitro: {
+    // Serves server/routes/_ws.ts. Nitro's WebSocket support is still behind
+    // this flag; without it the route 404s and the client sits on backoff.
+    experimental: { websocket: true },
+  },
+
+  runtimeConfig: {
+    // Service account for the FCM HTTP v1 API. Absent = push disabled, and
+    // the socket carries everything on its own.
+    fcm: {
+      projectId: '',
+      clientEmail: '',
+      privateKey: '',
+    },
+    public: {
+      // The Firebase web app config, plus the VAPID key from
+      // Project settings → Cloud Messaging → Web Push certificates.
+      firebase: {
+        apiKey: '',
+        authDomain: '',
+        projectId: '',
+        messagingSenderId: '',
+        appId: '',
+        vapidKey: '',
+      },
+    },
+  },
+
   app: {
     head: {
       title: 'WhatsApp',

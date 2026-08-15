@@ -9,6 +9,12 @@ export function clockNow(): string {
   })
 }
 
+/** Globally unique id for one message, so receipts can address it. */
+export function newWireId(): string {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
 export function initials(name: string): string {
   const parts = name
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')

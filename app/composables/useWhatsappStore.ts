@@ -7,6 +7,23 @@ import type {
   FilterKey,
   Message,
 } from '~/types/whatsapp'
+import type { ReceiptStatus, WireUser } from '#shared/types/wire'
+
+/**
+ * How the store reaches the network. `useRealtime` installs one of these at
+ * boot; until then — during SSR, or with the socket down — outgoing frames go
+ * nowhere and the UI still works on local state alone. The store never
+ * imports the transport, so the dependency only ever points one way.
+ */
+export interface ChatTransport {
+  sendMessage: (room: string, msg: { wireId: string, text: string, time: string }) => void
+  sendTyping: (room: string, on: boolean) => void
+  sendReceipt: (room: string, wireIds: string[], status: ReceiptStatus) => void
+}
+
+const transport = shallowRef<ChatTransport | null>(null)
+
+export const installChatTransport = (t: ChatTransport | null) => (transport.value = t)
 
 const FILTERS: Record<FilterKey, (c: Chat) => boolean> = {
   all: () => true,
@@ -175,16 +192,8 @@ export function useWhatsappStore() {
     current.value = name
     showPane('chat')
     composerFocus.value++
-  }
-
-  /** Move one message on to its next tick state. */
-  function advance(msg: Message, name: string, status: DeliveryStatus, delay: number) {
-    setTimeout(() => {
-      if (msg.status === status) return
-      msg.status = status
-      const chat = chatByName(name)
-      if (chat && chat.icon === 'done_all') chat.status = status
-    }, delay)
+    // Reading a conversation is what turns the sender's ticks blue.
+    markRead(name)
   }
 
   function send(rawText: string) {
@@ -192,7 +201,11 @@ export function useWhatsappStore() {
     if (!text) return
 
     const target = current.value
-    const msg: Message = { id: nextId(), out: true, text, time: clockNow(), status: 'sent' }
+    const time = clockNow()
+    const wireId = newWireId()
+    // One tick the moment it leaves: the second and the blue pair are the
+    // recipient's receipts coming back over the socket.
+    const msg: Message = { id: nextId(), wireId, out: true, text, time, status: 'sent' }
     threadOf(target).push(msg)
 
     setPreview(target, text, 'done_all')
@@ -200,21 +213,79 @@ export function useWhatsappStore() {
     if (chat) chat.status = 'sent'
 
     composerFocus.value++
-    advance(msg, target, 'delivered', 700)
-    advance(msg, target, 'read', 2200)
+    transport.value?.sendTyping(target, false)
+    transport.value?.sendMessage(target, { wireId, text, time })
+  }
+
+  /** A message arrived on the socket. Creates the conversation if it is new. */
+  function receiveMessage(frame: { room: string, from: WireUser, wireId: string, text: string, time: string }) {
+    const { room, from, text } = frame
+
+    // A message from someone not in the list opens a conversation for them.
+    const chat = ensureChat({ name: room })
+    const msgs = threadOf(room)
+
+    if (msgs.some(m => m.wireId === frame.wireId)) return // socket replay
+    // Sending ends the sender's typing indicator.
+    dropTyping(room, from.name)
+    msgs.push({ id: nextId(), wireId: frame.wireId, from: from.name, text, time: frame.time })
+
+    setPreview(room, chat.group ? `${from.name}: ${text}` : text)
+    bumpUnread(room)
+    if (room !== current.value) announce(`${from.name}: ${text}`)
+  }
+
+  /** Advance the ticks on our own bubbles. Status never walks backwards. */
+  function applyReceipt(room: string, wireIds: string[], status: ReceiptStatus) {
+    const msgs = threads.value[room]
+    if (!msgs) return
+
+    const wanted = new Set(wireIds)
+    let latest: DeliveryStatus | null = null
+    for (const m of msgs) {
+      if (!m.out || !m.wireId) continue
+      if (wanted.has(m.wireId) && m.status !== 'read') m.status = status
+      latest = m.status ?? latest
+    }
+
+    // The chat row carries the newest outgoing message's ticks.
+    const chat = chatByName(room)
+    if (chat && chat.icon === 'done_all' && latest) chat.status = latest
+  }
+
+  /** Tell the room we have read everything they sent us. */
+  function markRead(room: string) {
+    const wireIds = (threads.value[room] ?? [])
+      .filter(m => !m.out && m.wireId && isMessage(m))
+      .map(m => m.wireId!)
+    if (wireIds.length) transport.value?.sendReceipt(room, wireIds, 'read')
+  }
+
+  /** Confirm receipt of messages that arrived while we were elsewhere. */
+  function markDelivered(room: string, wireIds: string[]) {
+    if (wireIds.length) transport.value?.sendReceipt(room, wireIds, 'delivered')
+  }
+
+  /** Broadcast our own typing state for the open conversation. */
+  function notifyTyping(on: boolean) {
+    transport.value?.sendTyping(current.value, on)
   }
 
   /**
-   * Show or clear the "… is typing" bubble for a conversation. Wire this to a
-   * presence event; nothing else should push or remove typing entries by hand.
+   * Show or clear one person's "… is typing" bubble. Driven by the socket's
+   * typing frames; nothing else should push or remove typing entries by hand.
+   * Tracked per sender, so two people typing in a group show two bubbles.
    */
-  function setTyping(name: string, from?: string) {
-    const msgs = threadOf(name)
+  function setTyping(room: string, from: string, on: boolean) {
+    const msgs = threadOf(room)
     for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i]!.kind === 'typing') msgs.splice(i, 1)
+      const m = msgs[i]!
+      if (m.kind === 'typing' && m.from === from) msgs.splice(i, 1)
     }
-    if (from) msgs.push({ id: nextId(), kind: 'typing', from })
+    if (on) msgs.push({ id: nextId(), kind: 'typing', from })
   }
+
+  const dropTyping = (room: string, from: string) => setTyping(room, from, false)
 
   /** Append a call entry to a thread and mirror it in the chat list. */
   function logCall(
@@ -266,6 +337,13 @@ export function useWhatsappStore() {
     openChat,
     send,
     setTyping,
+    dropTyping,
     logCall,
+    // Realtime seam
+    receiveMessage,
+    applyReceipt,
+    markRead,
+    markDelivered,
+    notifyTyping,
   }
 }

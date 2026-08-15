@@ -5,11 +5,38 @@ const { composerFocus } = store
 const draft = ref('')
 const input = ref<HTMLInputElement | null>(null)
 
+/** Typing is presence, not history: announce it, then let it lapse. */
+const TYPING_IDLE_MS = 2500
+let typing = false
+let idleTimer: ReturnType<typeof setTimeout> | null = null
+
+function stopTyping() {
+  if (idleTimer) clearTimeout(idleTimer)
+  idleTimer = null
+  if (!typing) return
+  typing = false
+  store.notifyTyping(false)
+}
+
+function onInput() {
+  if (!typing) {
+    typing = true
+    store.notifyTyping(true)
+  }
+  if (idleTimer) clearTimeout(idleTimer)
+  idleTimer = setTimeout(stopTyping, TYPING_IDLE_MS)
+}
+
 function send() {
   if (!draft.value.trim()) return
+  stopTyping()
   store.send(draft.value)
   draft.value = ''
 }
+
+// Switching conversations must not leave a typing bubble behind in the old one.
+watch(() => store.current.value, stopTyping)
+onBeforeUnmount(stopTyping)
 
 // Opening a chat, and sending, both hand the caret back to the message box.
 watch(composerFocus, async () => {
@@ -34,6 +61,7 @@ watch(composerFocus, async () => {
         type="text"
         placeholder="Type a message"
         aria-label="Type a message"
+        @input="onInput"
         @keydown.enter="send"
       >
     </div>
